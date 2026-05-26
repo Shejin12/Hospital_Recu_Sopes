@@ -1,0 +1,7 @@
+hospital\gestor\GestorRecursos.class
+hospital\controlador\DeadlockController.class
+hospital\modelo\Paciente.class
+hospital\Simulador.class
+hospital\config\WebSocketConfig.class
+hospital\modelo\NivelTriaje.class
+hospital\servicio\WebSocketPublisher.class
