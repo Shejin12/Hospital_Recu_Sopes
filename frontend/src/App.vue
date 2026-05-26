@@ -34,26 +34,27 @@ const deadlock = ref({
 
 let animationFrameId;
 
-// Colores por prioridad
+// Colores por prioridad (Bootstrap)
 const getTriajeColor = (prioridad) => {
   switch(prioridad) {
-    case 1: return 'bg-red-500 text-white';
-    case 2: return 'bg-orange-500 text-white';
-    case 3: return 'bg-yellow-400 text-black';
-    case 4: return 'bg-green-500 text-white';
-    case 5: return 'bg-blue-500 text-white';
-    default: return 'bg-gray-300 text-black';
+    case 1: return 'bg-danger text-white';
+    case 2: return 'bg-warning text-dark';
+    case 3: return 'bg-warning text-dark';
+    case 4: return 'bg-success text-white';
+    case 5: return 'bg-primary text-white';
+    default: return 'bg-light text-dark';
   }
 };
 
+// Texto de prioridad (Bootstrap text colors)
 const getTriajeTextColor = (prioridad) => {
   switch(prioridad) {
-    case 1: return 'text-red-600';
-    case 2: return 'text-orange-600';
-    case 3: return 'text-yellow-600';
-    case 4: return 'text-green-600';
-    case 5: return 'text-blue-600';
-    default: return 'text-gray-600';
+    case 1: return 'text-danger';
+    case 2: return 'text-warning';
+    case 3: return 'text-warning';
+    case 4: return 'text-success';
+    case 5: return 'text-primary';
+    default: return 'text-muted';
   }
 };
 
@@ -78,15 +79,11 @@ const procesarEvento = (evento) => {
       triaje: evento.datos.triaje,
       prioridad: evento.datos.prioridad
     });
-    // Ordenar por prioridad
     pacientesEnEspera.value.sort((a, b) => a.prioridad - b.prioridad || a.idPaciente - b.idPaciente);
-  } 
+  }
   else if (evento.tipo === 'RECURSOS_ASIGNADOS') {
-    // Remover de la cola
     const idx = pacientesEnEspera.value.findIndex(p => p.idPaciente === evento.datos.idPaciente);
     if (idx !== -1) pacientesEnEspera.value.splice(idx, 1);
-    
-    // Agregar a atendidos
     pacientesAtendidos.value.push({
       idPaciente: evento.datos.idPaciente,
       triaje: evento.datos.triaje,
@@ -154,7 +151,6 @@ onMounted(() => {
       });
     }
   });
-  
   stompClient.activate();
   animationFrameId = requestAnimationFrame(updateProgress);
 });
@@ -163,121 +159,116 @@ onUnmounted(() => {
   if (stompClient) stompClient.deactivate();
   cancelAnimationFrame(animationFrameId);
 });
-
 </script>
 
 <template>
-  <div class="min-h-screen bg-slate-50 text-slate-800 p-6 font-sans relative">
-    
-    <!-- HEADER -->
-    <header class="mb-8 border-b pb-4 flex justify-between items-center">
-      <h1 class="text-3xl font-bold text-green-800">Hospital Central - Emergencias</h1>
-      <div class="bg-white px-4 py-2 rounded-lg shadow border border-green-100">
-        <span class="text-sm text-slate-500 uppercase font-semibold tracking-wider">Atendidos: </span>
-        <span class="text-2xl font-bold text-green-700">{{ stats.totalAtendidos }}</span>
+  <div class="container-fluid py-4 bg-light min-vh-100">
+    <!-- Header -->
+    <header class="d-flex justify-content-between align-items-center mb-4 border-bottom pb-2">
+      <h1 class="h3 text-success fw-bold">Hospital Central - Emergencias</h1>
+      <div class="bg-white px-3 py-2 rounded shadow border border-success">
+        <span class="text-muted text-uppercase small fw-semibold">Atendidos:</span>
+        <span class="h4 fw-bold text-success">{{ stats.totalAtendidos }}</span>
       </div>
     </header>
 
-    <div class="grid grid-cols-1 lg:grid-cols-4 gap-6">
-      
-      <!-- ESTADO DE RECURSOS -->
-      <div class="col-span-1 bg-white p-5 rounded-xl shadow-sm border border-slate-200">
-        <h2 class="text-xl font-bold text-slate-700 mb-4 border-b pb-2">Recursos</h2>
-        <div class="space-y-4">
-          <div v-for="(data, nombre) in recursos" :key="nombre">
-            <div class="flex justify-between text-sm mb-1 font-medium">
-              <span>{{ nombre }}</span>
-              <span :class="data.usados >= data.total ? 'text-red-600 font-bold' : 'text-green-600'">
-                {{ data.total - data.usados }} Disp. / {{ data.total }}
-              </span>
-            </div>
-            <div class="w-full bg-slate-200 rounded-full h-2.5">
-              <div class="h-2.5 rounded-full transition-all duration-300"
-                   :class="data.usados >= data.total ? 'bg-red-500' : 'bg-green-500'"
-                   :style="{ width: `${(data.usados / data.total) * 100}%` }">
+    <div class="row g-3">
+      <!-- Recursos -->
+      <div class="col-12 col-lg-3">
+        <div class="card h-100">
+          <div class="card-header fw-bold">Recursos</div>
+          <div class="card-body">
+            <div v-for="(data, nombre) in recursos" :key="nombre" class="mb-3">
+              <div class="d-flex justify-content-between text-sm fw-medium mb-1">
+                <span>{{ nombre }}</span>
+                <span :class="data.usados >= data.total ? 'text-danger fw-bold' : 'text-success'">
+                  {{ data.total - data.usados }} Disp. / {{ data.total }}
+                </span>
+              </div>
+              <div class="progress" style="height: 0.6rem;">
+                <div class="progress-bar" :class="data.usados >= data.total ? 'bg-danger' : 'bg-success'"
+                  role="progressbar"
+                  :style="{ width: `${(data.usados / data.total) * 100}%` }">
+                </div>
               </div>
             </div>
           </div>
         </div>
       </div>
 
-      <!-- PACIENTES ATENDIDOS Y LOGS -->
-      <div class="col-span-1 lg:col-span-2 flex flex-col gap-6">
-        
-        <!-- Atendidos -->
-        <div class="bg-white p-5 rounded-xl shadow-sm border border-slate-200 flex-1">
-          <h2 class="text-xl font-bold text-slate-700 mb-4 border-b pb-2">Pacientes en Atención</h2>
-          <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <div v-if="pacientesAtendidos.length === 0" class="text-slate-400 italic">No hay pacientes en atención.</div>
-            <div v-for="p in pacientesAtendidos" :key="p.idPaciente" 
-                 class="border rounded-lg p-4 bg-slate-50 shadow-sm relative overflow-hidden">
-              <div class="flex justify-between items-center mb-2">
-                <span class="font-bold text-slate-700">Paciente {{ p.idPaciente }}</span>
-                <span :class="['text-xs font-bold uppercase', getTriajeTextColor(p.prioridad)]">{{ p.triaje.replace('NIVEL_', '') }}</span>
-              </div>
-              <!-- Progress bar exacta -->
-              <div class="w-full bg-slate-200 rounded-full h-3">
-                <div class="bg-green-500 h-3 rounded-full transition-none" :style="{ width: `${p.progreso}%` }"></div>
+      <!-- Pacientes en Atención y Logs -->
+      <div class="col-12 col-lg-6 d-flex flex-column gap-3">
+        <!-- Pacientes en Atención -->
+        <div class="card flex-fill">
+          <div class="card-header fw-bold">Pacientes en Atención</div>
+          <div class="card-body">
+            <div class="row row-cols-1 row-cols-md-2 g-3">
+              <div v-if="pacientesAtendidos.length === 0" class="text-muted fst-italic">No hay pacientes en atención.</div>
+              <div v-for="p in pacientesAtendidos" :key="p.idPaciente" class="col">
+                <div class="border rounded p-3 bg-white shadow-sm position-relative overflow-hidden">
+                  <div class="d-flex justify-content-between align-items-center mb-2">
+                    <span class="fw-bold text-dark">Paciente {{ p.idPaciente }}</span>
+                    <span :class="['text-xs fw-bold text-uppercase', getTriajeTextColor(p.prioridad)]">
+                      {{ p.triaje.replace('NIVEL_', '') }}
+                    </span>
+                  </div>
+                  <div class="progress" style="height: 0.6rem;">
+                    <div class="progress-bar bg-success" role="progressbar" :style="{ width: `${p.progreso}%` }"></div>
+                  </div>
+                </div>
               </div>
             </div>
           </div>
         </div>
 
-        <!-- Terminal Logs -->
-        <div class="bg-slate-900 text-green-400 p-5 rounded-xl shadow-sm h-64 overflow-hidden flex flex-col">
-          <h2 class="text-lg font-bold text-white mb-2 border-b border-slate-700 pb-1">Logs del Sistema</h2>
-          <div class="overflow-y-auto flex-1 font-mono text-sm pr-2 space-y-1">
-            <div v-for="(l, i) in logs" :key="i" class="opacity-90">{{ l }}</div>
-          </div>
-        </div>
-
-      </div>
-
-      <!-- COLA DE ESPERA -->
-      <div class="col-span-1 bg-white p-5 rounded-xl shadow-sm border border-slate-200">
-        <h2 class="text-xl font-bold text-slate-700 mb-4 border-b pb-2">Cola de Espera ({{ pacientesEnEspera.length }})</h2>
-        <div class="space-y-3 overflow-y-auto max-h-[600px] pr-2">
-          <div v-if="pacientesEnEspera.length === 0" class="text-slate-400 italic">Sala vacía.</div>
-          <div v-for="p in pacientesEnEspera" :key="p.idPaciente"
-               class="flex justify-between items-center p-3 rounded-lg border border-slate-100 shadow-sm"
-               :class="getTriajeColor(p.prioridad)">
-            <span class="font-bold">Paciente {{ p.idPaciente }}</span>
-            <span class="text-xs font-bold tracking-widest">NIVEL {{ p.prioridad }}</span>
+        <!-- Logs -->
+        <div class="card flex-fill" style="height: 250px;">
+          <div class="card-header fw-bold text-white bg-dark">Logs del Sistema</div>
+          <div class="card-body bg-dark text-light p-2 overflow-auto">
+            <pre class="mb-0" v-for="(l, i) in logs" :key="i" >{{ l }}</pre>
           </div>
         </div>
       </div>
-      
-    </div>
 
-    <!-- MODAL DE DEADLOCK -->
-    <div v-if="deadlock.activo" class="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-70 backdrop-blur-sm">
-      <div class="bg-white rounded-2xl p-8 max-w-md w-full shadow-2xl border-4 border-red-500 transform animate-bounce-short">
-        <div class="text-center">
-          <div class="text-red-500 text-5xl font-black mb-4">¡ALERTA!</div>
-          <h2 class="text-2xl font-bold text-slate-800 mb-2">{{ deadlock.mensaje }}</h2>
-          <p class="text-slate-600 mb-6">El sistema ha entrado en una espera circular. Por favor, selecciona qué paciente debe recibir los recursos faltantes para continuar la simulación.</p>
-          
-          <div class="space-y-4">
-            <button v-for="id in deadlock.involucrados" :key="id" 
-                    @click="resolverDeadlock(id)"
-                    class="w-full bg-red-100 hover:bg-red-500 text-red-800 hover:text-white border border-red-300 font-bold py-3 px-4 rounded-xl transition-colors">
-              Favorecer Paciente {{ id }}
-            </button>
+      <!-- Cola de Espera -->
+      <div class="col-12 col-lg-3">
+        <div class="card h-100">
+          <div class="card-header fw-bold">Cola de Espera ({{ pacientesEnEspera.length }})</div>
+          <div class="card-body">
+            <div v-if="pacientesEnEspera.length === 0" class="text-muted fst-italic">Sala vacía.</div>
+            <ul class="list-group list-group-flush">
+              <li v-for="p in pacientesEnEspera" :key="p.idPaciente" class="list-group-item d-flex justify-content-between align-items-center" :class="getTriajeColor(p.prioridad)">
+                <span class="fw-bold">Paciente {{ p.idPaciente }}</span>
+                <span class="text-xs fw-bold">NIVEL {{ p.prioridad }}</span>
+              </li>
+            </ul>
           </div>
         </div>
       </div>
     </div>
 
+    <!-- Modal de Deadlock -->
+    <div v-if="deadlock.activo" class="modal show d-block" tabindex="-1" style="background: rgba(0,0,0,0.5);">
+      <div class="modal-dialog modal-dialog-centered">
+        <div class="modal-content border border-danger">
+          <div class="modal-header bg-danger text-white">
+            <h5 class="modal-title">¡ALERTA!</h5>
+          </div>
+          <div class="modal-body text-center">
+            <h4 class="mb-3">{{ deadlock.mensaje }}</h4>
+            <p class="mb-4">El sistema está en deadlock. Seleccione el paciente que debe recibir los recursos.</p>
+            <div class="d-grid gap-2">
+              <button v-for="id in deadlock.involucrados" :key="id" @click="resolverDeadlock(id)" class="btn btn-outline-danger btn-lg">
+                Favorecer Paciente {{ id }}
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
   </div>
 </template>
 
-<style>
-.animate-bounce-short {
-  animation: bounce-short 0.5s ease-out 1;
-}
-
-@keyframes bounce-short {
-  0%, 100% { transform: translateY(0); }
-  50% { transform: translateY(-10px); }
-}
+<style scoped>
+/* Mantener estilos mínimos */
 </style>
