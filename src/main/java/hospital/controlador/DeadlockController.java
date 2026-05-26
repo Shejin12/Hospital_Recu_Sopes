@@ -39,4 +39,22 @@ public class DeadlockController {
         
         return ResponseEntity.ok("Resolución enviada al gestor.");
     }
+
+    /**
+     * Endpoint para simular un deadlock.
+     * @return Respuesta HTTP
+     */
+    @PostMapping("/simular")
+    public ResponseEntity<String> simularDeadlock() {
+        System.out.println("[API REST] Petición recibida para simular deadlock.");
+        hospital.modelo.Paciente pA = new hospital.modelo.Paciente(gestorRecursos, hospital.modelo.NivelTriaje.NIVEL_1_CRITICO);
+        pA.setModoDeadlock(true);
+        hospital.modelo.Paciente pB = new hospital.modelo.Paciente(gestorRecursos, hospital.modelo.NivelTriaje.NIVEL_1_CRITICO);
+        pB.setModoDeadlock(true);
+
+        new Thread(pA).start();
+        new Thread(pB).start();
+        
+        return ResponseEntity.ok("Simulación de deadlock iniciada.");
+    }
 }

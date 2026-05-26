@@ -12,8 +12,12 @@ import java.util.concurrent.PriorityBlockingQueue;
 import java.util.concurrent.Semaphore;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.locks.ReentrantLock;
+import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
+import java.util.logging.Level;
+import java.util.logging.Logger;
 
 /**
  * Gestor central que administra los recursos del hospital de forma segura.
@@ -33,10 +37,10 @@ public class GestorRecursos {
     private final Semaphore ventiladores = new Semaphore(5, true);
     private final Semaphore monitores = new Semaphore(8, true);
 
-    // Cola de prioridad concurrente
+    // Cola de prioridad concurrente: garantiza orden por nivel de triaje
     private final PriorityBlockingQueue<Paciente> salaDeEspera = new PriorityBlockingQueue<>();
 
-    // Lock para asegurar exclusión mutua
+    // Lock para garantizar exclusión mutua al procesar la cola
     private final ReentrantLock lockAsignacion = new ReentrantLock(true);
 
     // Variables para Deadlock Controlado
@@ -50,11 +54,19 @@ public class GestorRecursos {
         this.publisher = publisher;
     }
 
+    public void logYEnviar(String mensaje) {
+        System.out.println(mensaje);
+        publisher.enviarEvento("CONSOLE_LOG", mensaje, null);
+    }
+
+    /**
+     * Ingresa al paciente en la cola de espera y dispara el procesamiento de la cola.
+     */
     public void solicitarRecursos(Paciente paciente) {
-        System.out.println("[GESTOR] Paciente " + paciente.getId() + " ingresa a la sala de espera.");
+        logYEnviar("[GESTOR] Paciente " + paciente.getId() + " ingresa a la sala de espera.");
         salaDeEspera.put(paciente);
         
-        // Emitir evento WS
+        // Emitir evento WebSocket para actualizar la cola en el frontend
         Map<String, Object> data = new HashMap<>();
         data.put("idPaciente", paciente.getId());
         data.put("triaje", paciente.getNivel().name());
@@ -64,8 +76,19 @@ public class GestorRecursos {
         procesarCola();
     }
 
+    /**
+     * Implementa el escenario de interbloqueo controlado para demostración.
+     * El Paciente A adquiere un Cirujano y espera un Ventilador.
+     * El Paciente B adquiere un Ventilador y espera un Cirujano.
+     * Ambos quedan bloqueados → deadlock detectado → frontend elige ganador.
+     */
     public void forzarDeadlock(Paciente paciente) {
-        System.out.println("[DEADLOCK-DEMO] Paciente " + paciente.getId() + " entra a modo interbloqueo.");
+        try {
+            Thread.sleep(3000);
+        } catch (InterruptedException ex) {
+            Logger.getLogger(GestorRecursos.class.getName()).log(Level.SEVERE, null, ex);
+        }
+        logYEnviar("[DEADLOCK-DEMO] Paciente " + paciente.getId() + " entra a modo interbloqueo.");
         
         boolean esPacienteA = false;
         
@@ -76,6 +99,7 @@ public class GestorRecursos {
             } else if (pacienteDeadlockB == null) {
                 pacienteDeadlockB = paciente;
             } else {
+                // Ya hay dos pacientes en deadlock, este entra a cola normal
                 solicitarRecursos(paciente);
                 return;
             }
@@ -83,6 +107,7 @@ public class GestorRecursos {
 
         try {
             if (esPacienteA) {
+                // Paciente A: adquiere Cirujano, luego intenta adquirir Ventilador
                 cirujanos.acquire(1);
                 Thread.sleep(1000);
                 boolean obtuvoVentilador = ventiladores.tryAcquire(1, 3, TimeUnit.SECONDS);
@@ -96,6 +121,7 @@ public class GestorRecursos {
                 }
 
             } else {
+                // Paciente B: adquiere Ventilador, luego intenta adquirir Cirujano
                 ventiladores.acquire(1);
                 Thread.sleep(1000);
                 boolean obtuvoCirujano = cirujanos.tryAcquire(1, 3, TimeUnit.SECONDS);
@@ -113,21 +139,26 @@ public class GestorRecursos {
         }
     }
 
+    /**
+     * Emite un evento WebSocket avisando al frontend del deadlock detectado.
+     */
     private void reportarDeadlock(int idPaciente, String recursoRetenido, String recursoFaltante) {
         System.err.println(">>>> [ALERTA] Paciente " + idPaciente + " detectó DEADLOCK.");
         Map<String, Object> data = new HashMap<>();
         data.put("idPaciente", idPaciente);
         data.put("recursoRetenido", recursoRetenido);
         data.put("recursoFaltante", recursoFaltante);
-        
-        // Ojo: Esto se emitirá dos veces (una por paciente)
         publisher.enviarEvento("DEADLOCK_DETECTADO", 
             "El paciente " + idPaciente + " retiene " + recursoRetenido + " pero necesita " + recursoFaltante, data);
     }
 
+    /**
+     * Aplica la resolución del deadlock: el ganador obtiene los recursos faltantes
+     * y el perdedor libera lo que tenía y regresa a la cola normal.
+     */
     private void aplicarResolucionDeadlock(Paciente paciente, boolean esPacienteA) throws InterruptedException {
         if (paciente.getId() == idGanadorDeadlock) {
-            System.out.println("[RESOLUCIÓN] Paciente " + paciente.getId() + " GANÓ.");
+            logYEnviar("[RESOLUCIÓN] Paciente " + paciente.getId() + " GANÓ.");
             publisher.enviarEvento("DEADLOCK_RESUELTO", "Paciente " + paciente.getId() + " fue elegido ganador.", null);
             
             Thread.sleep(500); 
@@ -142,27 +173,47 @@ public class GestorRecursos {
             paciente.notificarRecursosAsignados();
             publisher.enviarEvento("ATENCION_INICIADA", "Paciente " + paciente.getId() + " inició atención (Deadlock superado).", paciente.getId());
         } else {
-            System.out.println("[RESOLUCIÓN] Paciente " + paciente.getId() + " PERDIÓ.");
+            logYEnviar("[RESOLUCIÓN] Paciente " + paciente.getId() + " PERDIÓ.");
             if (esPacienteA) cirujanos.release(1);
             else ventiladores.release(1);
             
+            // El paciente perdedor regresa a la cola de espera normal
             solicitarRecursos(paciente); 
+        }
+
+        synchronized (this) {
+            // Reiniciar estado para futuras simulaciones de deadlock
+            if (esPacienteA) {
+                pacienteDeadlockA = null;
+            } else {
+                pacienteDeadlockB = null;
+            }
+            if (pacienteDeadlockA == null && pacienteDeadlockB == null) {
+                idGanadorDeadlock = -1;
+                latchResolucionDeadlock = new CountDownLatch(1);
+            }
         }
     }
 
+    /**
+     * Recibe el ID del paciente ganador desde el frontend y desbloquea el latch.
+     */
     public void resolverDeadlock(String idPacienteElegido) {
         try {
             this.idGanadorDeadlock = Integer.parseInt(idPacienteElegido);
             latchResolucionDeadlock.countDown();
         } catch (NumberFormatException e) {
-            System.err.println("ID inválido.");
+            System.err.println("ID de paciente inválido para resolver deadlock: " + idPacienteElegido);
         }
     }
 
+    /**
+     * Libera todos los recursos del paciente y vuelve a procesar la cola.
+     */
     public void liberarRecursos(Paciente paciente) {
         NivelTriaje nivel = paciente.getNivel();
         
-        System.out.println("[LIBERANDO] " + paciente.toString() + " devuelve sus recursos.");
+        logYEnviar("[LIBERANDO] " + paciente.toString() + " devuelve sus recursos.");
         publisher.enviarEvento("RECURSOS_LIBERADOS", "Paciente " + paciente.getId() + " liberó sus recursos.", paciente.getId());
 
         if (nivel.getSalasRequeridas() > 0) salas.release(nivel.getSalasRequeridas());
@@ -176,15 +227,32 @@ public class GestorRecursos {
         procesarCola();
     }
 
+    /**
+     * Procesa la cola de espera intentando asignar recursos a cada paciente.
+     *
+     * BUG CORREGIDO: La versión anterior usaba break() al encontrar el primer paciente
+     * sin recursos, bloqueando permanentemente a TODOS los pacientes detrás de él,
+     * incluso si un paciente de menor prioridad sí podía ser atendido con los recursos
+     * disponibles (ej: un Nivel 3 que solo necesita sala+médico mientras esperaba un
+     * Nivel 1 que requería quirófano ocupado).
+     *
+     * SOLUCIÓN: Se drena toda la cola, se intenta atender a cada paciente en orden
+     * de prioridad, y los que no pueden ser atendidos se reinsertan para mantener
+     * el ordenamiento correcto de la PriorityBlockingQueue.
+     */
     private void procesarCola() {
         lockAsignacion.lock();
         try {
-            while (!salaDeEspera.isEmpty()) {
-                Paciente pacienteEnEspera = salaDeEspera.peek();
+            List<Paciente> noAtendidos = new ArrayList<>();
+            Paciente pacienteEnEspera;
+
+            // Drain completo de la cola para evaluar a todos los pacientes
+            while ((pacienteEnEspera = salaDeEspera.poll()) != null) {
                 NivelTriaje nivel = pacienteEnEspera.getNivel();
 
                 if (hayRecursosDisponibles(nivel)) {
                     try {
+                        // Adquirir todos los recursos requeridos por este nivel
                         if (nivel.getSalasRequeridas() > 0) salas.acquire(nivel.getSalasRequeridas());
                         if (nivel.getQuirofanosRequeridos() > 0) quirofanos.acquire(nivel.getQuirofanosRequeridos());
                         if (nivel.getMedicosRequeridos() > 0) medicos.acquire(nivel.getMedicosRequeridos());
@@ -193,8 +261,7 @@ public class GestorRecursos {
                         if (nivel.getVentiladoresRequeridos() > 0) ventiladores.acquire(nivel.getVentiladoresRequeridos());
                         if (nivel.getMonitoresRequeridos() > 0) monitores.acquire(nivel.getMonitoresRequeridos());
                         
-                        salaDeEspera.poll();
-                        System.out.println("[ASIGNADO] Recursos entregados a " + pacienteEnEspera.toString());
+                        logYEnviar("[ASIGNADO] Recursos entregados a " + pacienteEnEspera.toString());
                         
                         Map<String, Object> data = new HashMap<>();
                         data.put("idPaciente", pacienteEnEspera.getId());
@@ -207,16 +274,28 @@ public class GestorRecursos {
                         
                     } catch (InterruptedException e) {
                         Thread.currentThread().interrupt();
+                        // Si fue interrumpido durante la adquisición, reinsertar en cola
+                        noAtendidos.add(pacienteEnEspera);
                     }
                 } else {
-                    break; 
+                    // No hay recursos suficientes ahora: guardar para reinsertar
+                    noAtendidos.add(pacienteEnEspera);
                 }
             }
+
+            // Reinsertar todos los pacientes que no pudieron ser atendidos.
+            // PriorityBlockingQueue reordenará según Comparable de Paciente.
+            salaDeEspera.addAll(noAtendidos);
+
         } finally {
             lockAsignacion.unlock();
         }
     }
 
+    /**
+     * Verifica de forma atómica si hay suficientes permisos en cada semáforo
+     * para atender al paciente con el nivel de triaje dado.
+     */
     private boolean hayRecursosDisponibles(NivelTriaje nivel) {
         return salas.availablePermits() >= nivel.getSalasRequeridas() &&
                quirofanos.availablePermits() >= nivel.getQuirofanosRequeridos() &&

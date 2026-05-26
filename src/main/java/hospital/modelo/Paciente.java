@@ -80,7 +80,7 @@ public class Paciente implements Runnable, Comparable<Paciente> {
     @Override
     public void run() {
         try {
-            System.out.println("[INGRESO] Paciente " + id + " llega con " + nivel);
+            gestor.logYEnviar("[INGRESO] Paciente " + id + " llega con " + nivel);
             
             if (modoDeadlock && nivel.getPrioridad() == 1) {
                 // Ir por la ruta del deadlock controlado
@@ -94,13 +94,13 @@ public class Paciente implements Runnable, Comparable<Paciente> {
             }
             
             // 3. Recursos asignados, iniciar atención
-            System.out.println("[ATENCION] Paciente " + id + " (" + nivel + ") está siendo atendido por " + (tiempoAtencionMs/1000) + "s.");
+            gestor.logYEnviar("[ATENCION] Paciente " + id + " (" + nivel + ") está siendo atendido por " + (tiempoAtencionMs/1000) + "s.");
             
             // Simular el tiempo de atención usando la variable de clase calculada
             Thread.sleep(tiempoAtencionMs);
             
             // 4. Finalizar atención y liberar recursos
-            System.out.println("[SALIDA] Paciente " + id + " (" + nivel + ") terminó su atención. Liberando recursos...");
+            gestor.logYEnviar("[SALIDA] Paciente " + id + " (" + nivel + ") terminó su atención. Liberando recursos...");
             gestor.liberarRecursos(this);
             
         } catch (InterruptedException e) {

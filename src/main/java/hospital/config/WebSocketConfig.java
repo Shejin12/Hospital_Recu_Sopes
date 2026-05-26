@@ -24,10 +24,7 @@ public class WebSocketConfig implements WebSocketMessageBrokerConfigurer {
     @Override
     public void registerStompEndpoints(StompEndpointRegistry registry) {
         // Registramos el endpoint principal de conexión al WebSocket.
-        // Habilitamos CORS (setAllowedOrigins("*")) para permitir peticiones del frontend.
-        registry.addEndpoint("/ws-hospital").setAllowedOriginPatterns("*").withSockJS();
-        
-        // También exponemos el endpoint sin SockJS para clientes nativos u otros clientes web
+        // Habilitamos CORS para permitir peticiones del frontend.
         registry.addEndpoint("/ws-hospital").setAllowedOriginPatterns("*");
     }
 }

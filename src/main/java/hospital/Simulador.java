@@ -53,21 +53,6 @@ public class Simulador implements CommandLineRunner {
     }
 
     private void iniciarSimulacionInfinita() {
-        System.out.println("[SISTEMA] Preparando demostración de interbloqueo...");
-        
-        // --- INICIO MODO DEADLOCK DEMO ---
-        Paciente pA = new Paciente(gestor, NivelTriaje.NIVEL_1_CRITICO);
-        pA.setModoDeadlock(true);
-        Paciente pB = new Paciente(gestor, NivelTriaje.NIVEL_1_CRITICO);
-        pB.setModoDeadlock(true);
-
-        new Thread(pA).start();
-        new Thread(pB).start();
-        // Nota: Ya no simulamos la llamada a resolverDeadlock() aquí, 
-        // porque ahora esperamos que el frontend lo llame vía la API REST.
-        // --- FIN MODO DEADLOCK DEMO ---
-
-
         // Bucle infinito para llegada de pacientes
         System.out.println("[SISTEMA] Iniciando llegada de pacientes en paralelo...");
         while (true) {
