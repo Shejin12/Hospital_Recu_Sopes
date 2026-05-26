@@ -84,7 +84,11 @@ public class Paciente implements Runnable, Comparable<Paciente> {
             
             if (modoDeadlock && nivel.getPrioridad() == 1) {
                 // Ir por la ruta del deadlock controlado
-                gestor.forzarDeadlock(this);
+                boolean gano = gestor.forzarDeadlock(this);
+                if (!gano) {
+                    // Si perdió el deadlock, ya fue reinsertado en la cola. Debe esperar normalmente.
+                    latchEspera.await();
+                }
             } else {
                 // 1. Solicitar recursos al gestor
                 gestor.solicitarRecursos(this);

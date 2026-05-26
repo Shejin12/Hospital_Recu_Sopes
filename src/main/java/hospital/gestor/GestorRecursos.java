@@ -48,10 +48,29 @@ public class GestorRecursos {
     private Paciente pacienteDeadlockB = null;
     private CountDownLatch latchResolucionDeadlock = new CountDownLatch(1);
     private int idGanadorDeadlock = -1;
+    
+    // Bandera para pausar la simulación durante el interbloqueo
+    private volatile boolean simulacionPausada = false;
 
     @Autowired
     public GestorRecursos(WebSocketPublisher publisher) {
         this.publisher = publisher;
+    }
+
+    public boolean isSimulacionPausada() {
+        return simulacionPausada;
+    }
+
+    public void emitirEstadoRecursos() {
+        Map<String, Integer> estado = new HashMap<>();
+        estado.put("salas", salas.availablePermits());
+        estado.put("quirofanos", quirofanos.availablePermits());
+        estado.put("medicos", medicos.availablePermits());
+        estado.put("cirujanos", cirujanos.availablePermits());
+        estado.put("enfermeras", enfermeras.availablePermits());
+        estado.put("ventiladores", ventiladores.availablePermits());
+        estado.put("monitores", monitores.availablePermits());
+        publisher.enviarEvento("RECURSOS_ESTADO", "Estado de recursos actualizado", estado);
     }
 
     public void logYEnviar(String mensaje) {
@@ -82,7 +101,7 @@ public class GestorRecursos {
      * El Paciente B adquiere un Ventilador y espera un Cirujano.
      * Ambos quedan bloqueados → deadlock detectado → frontend elige ganador.
      */
-    public void forzarDeadlock(Paciente paciente) {
+    public boolean forzarDeadlock(Paciente paciente) {
         try {
             Thread.sleep(3000);
         } catch (InterruptedException ex) {
@@ -101,41 +120,28 @@ public class GestorRecursos {
             } else {
                 // Ya hay dos pacientes en deadlock, este entra a cola normal
                 solicitarRecursos(paciente);
-                return;
+                return false;
             }
         }
 
         try {
             if (esPacienteA) {
-                // Paciente A: adquiere Cirujano, luego intenta adquirir Ventilador
-                cirujanos.acquire(1);
+                // Paciente A: finge adquirir Cirujano y falla al adquirir Ventilador
                 Thread.sleep(1000);
-                boolean obtuvoVentilador = ventiladores.tryAcquire(1, 3, TimeUnit.SECONDS);
-                
-                if (!obtuvoVentilador) {
-                    reportarDeadlock(paciente.getId(), "Cirujano", "Ventilador");
-                    latchResolucionDeadlock.await();
-                    aplicarResolucionDeadlock(paciente, true);
-                } else {
-                    paciente.notificarRecursosAsignados();
-                }
+                reportarDeadlock(paciente.getId(), "Cirujano", "Ventilador");
+                latchResolucionDeadlock.await();
+                return aplicarResolucionDeadlock(paciente, true);
 
             } else {
-                // Paciente B: adquiere Ventilador, luego intenta adquirir Cirujano
-                ventiladores.acquire(1);
+                // Paciente B: finge adquirir Ventilador y falla al adquirir Cirujano
                 Thread.sleep(1000);
-                boolean obtuvoCirujano = cirujanos.tryAcquire(1, 3, TimeUnit.SECONDS);
-                
-                if (!obtuvoCirujano) {
-                    reportarDeadlock(paciente.getId(), "Ventilador", "Cirujano");
-                    latchResolucionDeadlock.await();
-                    aplicarResolucionDeadlock(paciente, false);
-                } else {
-                    paciente.notificarRecursosAsignados();
-                }
+                reportarDeadlock(paciente.getId(), "Ventilador", "Cirujano");
+                latchResolucionDeadlock.await();
+                return aplicarResolucionDeadlock(paciente, false);
             }
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
+            return false;
         }
     }
 
@@ -143,7 +149,8 @@ public class GestorRecursos {
      * Emite un evento WebSocket avisando al frontend del deadlock detectado.
      */
     private void reportarDeadlock(int idPaciente, String recursoRetenido, String recursoFaltante) {
-        System.err.println(">>>> [ALERTA] Paciente " + idPaciente + " detectó DEADLOCK.");
+        simulacionPausada = true;
+        System.err.println(">>>> [ALERTA] Paciente " + idPaciente + " detectó DEADLOCK. SIMULACIÓN PAUSADA.");
         Map<String, Object> data = new HashMap<>();
         data.put("idPaciente", idPaciente);
         data.put("recursoRetenido", recursoRetenido);
@@ -156,26 +163,35 @@ public class GestorRecursos {
      * Aplica la resolución del deadlock: el ganador obtiene los recursos faltantes
      * y el perdedor libera lo que tenía y regresa a la cola normal.
      */
-    private void aplicarResolucionDeadlock(Paciente paciente, boolean esPacienteA) throws InterruptedException {
+    private boolean aplicarResolucionDeadlock(Paciente paciente, boolean esPacienteA) throws InterruptedException {
+        boolean gano = false;
         if (paciente.getId() == idGanadorDeadlock) {
             logYEnviar("[RESOLUCIÓN] Paciente " + paciente.getId() + " GANÓ.");
             publisher.enviarEvento("DEADLOCK_RESUELTO", "Paciente " + paciente.getId() + " fue elegido ganador.", null);
             
-            Thread.sleep(500); 
-            if (esPacienteA) ventiladores.acquire(1);
-            else cirujanos.acquire(1);
+            // El ganador adquiere todos los recursos reales que requiere su nivel
+            NivelTriaje nivel = paciente.getNivel();
+            if (nivel.getSalasRequeridas() > 0) salas.acquire(nivel.getSalasRequeridas());
+            if (nivel.getQuirofanosRequeridos() > 0) quirofanos.acquire(nivel.getQuirofanosRequeridos());
+            if (nivel.getMedicosRequeridos() > 0) medicos.acquire(nivel.getMedicosRequeridos());
+            if (nivel.getCirujanosRequeridos() > 0) cirujanos.acquire(nivel.getCirujanosRequeridos());
+            if (nivel.getEnfermerasRequeridas() > 0) enfermeras.acquire(nivel.getEnfermerasRequeridas());
+            if (nivel.getVentiladoresRequeridos() > 0) ventiladores.acquire(nivel.getVentiladoresRequeridos());
+            if (nivel.getMonitoresRequeridos() > 0) monitores.acquire(nivel.getMonitoresRequeridos());
             
-            salas.acquire(1);
-            quirofanos.acquire(1);
-            enfermeras.acquire(2);
-            monitores.acquire(1);
-            
+            // Emitir evento para el ganador de deadlock para que la interfaz sepa que tomó sus recursos completos
+            Map<String, Object> data = new HashMap<>();
+            data.put("idPaciente", paciente.getId());
+            data.put("triaje", paciente.getNivel().name());
+            data.put("prioridad", paciente.getNivel().getPrioridad());
+            data.put("tiempoAtencion", paciente.getTiempoAtencionMs());
+            publisher.enviarEvento("RECURSOS_ASIGNADOS", "Paciente " + paciente.getId() + " inició atención (Deadlock superado).", data);
+
             paciente.notificarRecursosAsignados();
             publisher.enviarEvento("ATENCION_INICIADA", "Paciente " + paciente.getId() + " inició atención (Deadlock superado).", paciente.getId());
+            gano = true;
         } else {
             logYEnviar("[RESOLUCIÓN] Paciente " + paciente.getId() + " PERDIÓ.");
-            if (esPacienteA) cirujanos.release(1);
-            else ventiladores.release(1);
             
             // El paciente perdedor regresa a la cola de espera normal
             solicitarRecursos(paciente); 
@@ -191,8 +207,16 @@ public class GestorRecursos {
             if (pacienteDeadlockA == null && pacienteDeadlockB == null) {
                 idGanadorDeadlock = -1;
                 latchResolucionDeadlock = new CountDownLatch(1);
+                simulacionPausada = false;
+                System.out.println(">>>> SIMULACIÓN REANUDADA.");
             }
         }
+        
+        emitirEstadoRecursos();
+        if (!simulacionPausada) {
+            procesarCola();
+        }
+        return gano;
     }
 
     /**
@@ -224,6 +248,7 @@ public class GestorRecursos {
         if (nivel.getVentiladoresRequeridos() > 0) ventiladores.release(nivel.getVentiladoresRequeridos());
         if (nivel.getMonitoresRequeridos() > 0) monitores.release(nivel.getMonitoresRequeridos());
 
+        emitirEstadoRecursos();
         procesarCola();
     }
 
@@ -241,6 +266,7 @@ public class GestorRecursos {
      * el ordenamiento correcto de la PriorityBlockingQueue.
      */
     private void procesarCola() {
+        if (simulacionPausada) return;
         lockAsignacion.lock();
         try {
             List<Paciente> noAtendidos = new ArrayList<>();
@@ -270,6 +296,7 @@ public class GestorRecursos {
                         data.put("tiempoAtencion", pacienteEnEspera.getTiempoAtencionMs());
                         publisher.enviarEvento("RECURSOS_ASIGNADOS", "Paciente " + pacienteEnEspera.getId() + " inició atención.", data);
 
+                        emitirEstadoRecursos();
                         pacienteEnEspera.notificarRecursosAsignados();
                         
                     } catch (InterruptedException e) {

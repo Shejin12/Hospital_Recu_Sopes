@@ -158,15 +158,7 @@ const getNivelProgressColor = (prioridad) => {
   }
 };
 
-const actualizarRecursos = (triaje, ocupando) => {
-  const req = requisitosTriaje[triaje];
-  if(req) {
-    for (const res in req) {
-      if (ocupando) recursos.value[res].usados += req[res];
-      else recursos.value[res].usados -= req[res];
-    }
-  }
-};
+// La actualización de recursos ahora se maneja centralizadamente con el evento RECURSOS_ESTADO
 
 const procesarEvento = (evento) => {
   const time = new Date(evento.timestamp).toLocaleTimeString();
@@ -174,6 +166,7 @@ const procesarEvento = (evento) => {
   if (logs.value.length > 50) logs.value.pop();
 
   if (evento.tipo === 'NUEVO_PACIENTE') {
+    if (pacientesAtendidos.value.some(p => p.idPaciente === evento.datos.idPaciente)) return;
     pacientesEnEspera.value.push({
       idPaciente: evento.datos.idPaciente,
       triaje: evento.datos.triaje,
@@ -192,17 +185,24 @@ const procesarEvento = (evento) => {
       startTime: Date.now(),
       progreso: 0
     });
-    actualizarRecursos(evento.datos.triaje, true);
   }
   else if (evento.tipo === 'RECURSOS_LIBERADOS') {
     const id = evento.datos;
     const idx = pacientesAtendidos.value.findIndex(p => p.idPaciente === id);
     if (idx !== -1) {
-      const p = pacientesAtendidos.value[idx];
-      actualizarRecursos(p.triaje, false);
       pacientesAtendidos.value.splice(idx, 1);
       stats.value.totalAtendidos++;
     }
+  }
+  else if (evento.tipo === 'RECURSOS_ESTADO') {
+    const state = evento.datos;
+    recursos.value.Salas.usados = recursos.value.Salas.total - state.salas;
+    recursos.value.Quirofanos.usados = recursos.value.Quirofanos.total - state.quirofanos;
+    recursos.value.Medicos.usados = recursos.value.Medicos.total - state.medicos;
+    recursos.value.Cirujanos.usados = recursos.value.Cirujanos.total - state.cirujanos;
+    recursos.value.Enfermeras.usados = recursos.value.Enfermeras.total - state.enfermeras;
+    recursos.value.Ventiladores.usados = recursos.value.Ventiladores.total - state.ventiladores;
+    recursos.value.Monitores.usados = recursos.value.Monitores.total - state.monitores;
   }
   else if (evento.tipo === 'DEADLOCK_DETECTADO') {
     deadlock.value.activo = true;
